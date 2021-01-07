@@ -98,7 +98,7 @@ int main()
         printf("NU%d icin benzerlik oranlari:\n", i + 1);
         for (j = 0; j < k; j++)
         {
-            printf("%d. en yakin id: %d, benzerlik: %f\n", j + 1, similarity[i][j].user_id + 1, similarity[i][j].similarity);
+            printf("%d. en yakin user: U%d, benzerlik: %f\n", j + 1, similarity[i][j].user_id + 1, similarity[i][j].similarity);
         }
     }
 
