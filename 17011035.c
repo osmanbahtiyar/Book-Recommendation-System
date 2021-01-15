@@ -2,379 +2,578 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#define MAX_LENGTH 50
 
-//benzerliklerin tutulacagi similarity matrisinin her bir elemani bu tipte olacak
-//hangi kullanicinin benzerligi ne kadar oldugu tutuluyor
-typedef struct
+//her kullanicinin en benzer kisileri bir linked list yapisinda tutulacaktir
+typedef struct sim_node
 {
-    int user_id;
+    //kullanicinin bizim bu kullanici ile similaritysi
     float similarity;
-} Sim_node;
+    //bu similarity'nin ait oldugu kullanicinin id'si
+    int id;
+    //linked list next
+    struct sim_node *next;
+} SimNode;
 
-//csv dosyasinin okunarak train icin kullanilacak kullanicilarin train_data, test için kullanilacak kullanicilarin test_data icerisine atilmesi, kitap isimlerinin book_names icerisine islemleri bu fonksiyonda yapılıyor
-void readFromCSV(int **train_data, int train_size, int **test_data, int test_size, char **book_names, int book_count);
+//her kullanici bir struct olarak tutulacaktir
+typedef struct user
+{
+    //okudugu kitaplara verdigi puanlarin oldugu bir integer array
+    //kitaps sayisina gore dinamik acilacak
+    int *books;
+    //benzer kullanicilarin tutuldugu k uzunluklu linked list'in head'i
+    SimNode *similarities;
+} User;
 
-//iki kullanicinin birbiri ile olan benzerligini hesaplayan fonksiyon
-float calculateSimilarity(int *user1, int *user2, int book_count);
+//U ile baslayan kullanicilarin tutuldugu bir array
+User **train_data = NULL;
+//NU ile baslayan kullanicilarin tutuldugu array
+User **test_data = NULL;
+//kitaplarin isimlerinin tutuldugu string array
+char **book_names = NULL;
+//kitapların sayisi
+int book_count = 0;
+//kac tane U ile baslayan kullanici oldugunun sayisi
+int train_count = 0;
+//kac tane NU ile baslayan kullanici oldugunun sayisi
+int test_count = 0;
+//en benzer kac kullanicinin gosterilecegini gosteren k sayisi
+int k;
 
-//verilen dizinin verilen indexinden sonrasini bir saga kaydiran fonksiyon
-void shiftRight(Sim_node *arr, int n, int index);
-
-//verilen kullaniciya en cok benzeyen k adet kullanicinin tutuldugu k boyutlu diziye insert islemi yapan fonksiyon
-void insertToSimilarityArray(Sim_node *similarity_arr, int k, float new_sim, int new_id);
-
-//verilen kullaniciya en benzer k adet kullaniciyi bulan fonksiyon
-void findKSimilarUsers(int *new_user, Sim_node *nu_similarity, int **train_data, int train_size, int book_count, int k);
-
-//verilen kullanicinin okudugu kitaplara verdigi ortalama puani hesaplayan fonksiyon
-float calculateAverageRating(int *user, int book_count);
-
-//verilen kullanici icin verilen kitaba kac puan verecegini tahmin eden fonksiyon
-float makePrediction(int *nu, int book_no, Sim_node *nu_similarity, int **train_data, int book_count, int k);
+//verilen dosyadaki kitap ve kullanici bilgilerini okuyan fonksiyon
+void readFromCSV();
+//yeni kitap eklendikce kitap isimlerinin tutuldugu string arrayini reallocate eden fonksiyon
+void expandBookNames();
+//User tipinde bir struct allocate eden fonksiyon
+User *createNewUser();
+//yeni U kullanicisi eklendikce U kullanicilarinin tutuldugu array'i reallocate eden fonksiyon
+void expandTrainData();
+//yeni NU kullanicisi eklendikce NU kullanicilarinin tutuldugu array'i reallocate eden fonksiyon
+void expandTestData();
+//verilen kullanicinin kitaplara verdigi ortalama puanlari bulan fonksiyon
+float calculateAverageRating(User *user);
+//verilen iki kullanicinin verilen formule gore benzerliklerini hesaplayan fonksiyon
+float calculateSimilarity(User *user1, User *user2);
+//verilen kullaniciya en benzer k kisiyi bulan fonksiyon
+void findKSimilarUsers(User *user);
+//verilen kullanicinin similarity listesine verilen yeni sim ve id degerlerini sırali insert eden fonksiyon
+void insertToSimilarityList(User *user, float new_sim, int new_id);
+//verilen kullanicinin verilen kitaba kac puan verecegini tahmin eden fonksiyon
+float makePrediction(User *nu, int book_no);
 
 int main()
 {
-    int train_size;
-    int test_size;
-    int book_count;
-    int k;
+    //verilen dosyayi oku ve uygun kullanicilari olustur
+    readFromCSV();
 
-    int **train_data;
-    int **test_data;
-    char **book_names;
-    Sim_node **similarity;
-
-    printf("Train data kullanici sayisini giriniz: ");
-    scanf("%d", &train_size);
-    printf("Test data kullanici sayisini giriniz: ");
-    scanf("%d", &test_size);
-    printf("Kitap sayisini giriniz: ");
-    scanf("%d", &book_count);
-    printf("En benzer kac kisiyi istiyorsunuz: ");
-    scanf("%d", &k);
-
-    train_data = (int **)calloc(train_size, sizeof(int *));
-    test_data = (int **)calloc(test_size, sizeof(int *));
-    book_names = (char **)calloc(book_count, sizeof(char *));
-    similarity = (Sim_node **)calloc(test_size, sizeof(Sim_node *));
-    if (train_data == NULL || test_data == NULL || book_names == NULL || similarity == NULL)
+    //kullanici gecerli bir deger girmedigi surece soran bir do-while dongusu
+    do
     {
-        fprintf(stderr, "Allocation Error\n");
-        exit(1);
-    }
+        //kullanicidan en yakin kac kisiyi hesaplamak istedigi bilgisinin alinmasi
+        printf("Please enter the similar user count (k) bigger than 0: ");
+        scanf("%d", &k);
+        //eger kullanici 0 dan kucuk bir sayi girdi ise uyar
+        if (k <= 0)
+        {
+            printf("k must be positive integer number!\n");
+        }
+        //eger kullanici k degerini bizim U ile baslayan train user sayimizdan fazla girdi ise uyar
+        if (k > train_count)
+        {
+            printf("Not that many users!!\n");
+        }
+        //kosullar saglanmadigi surece sor
+    } while (k <= 0 || k > train_count);
 
+    //kullanicinin hangi NU icin degerleri istedigini tutacak degisken
+    int id;
+    do
+    {
+        //kullanicidan hangi NU icin degerleri istedigini sor
+        printf("Please enter the test data user id\nFor example please enter only 2 for NU2: ");
+        scanf("%d", &id);
+        //eger girdigi deger dosyada yoksa uyar
+        if (id > test_count)
+        {
+            printf("There is no user like NU%d\n", id);
+            //id'nin gecersiz oldugunu belirtmek icin -1 yap
+            id = -1;
+        }
+        //id positive integer olmak zorunda degilse uyar
+        else if (id <= 0)
+        {
+            printf("ID has to be positive integer\n");
+            //id'nin gecersiz oldugunu belirtmek icin -1 yap
+            id = -1;
+        }
+        //id gecersiz oldugu surece don
+    } while (id == -1);
+    //kullanicidan alinan id 1 den basliyor ancak bizim indexlerimiz 0'dan basliyor o yuzden 1 azalt
+    id--;
+
+    //i dongu degiskeni
     int i;
-    for (i = 0; i < train_size; i++)
+    //Test_data arrayimdeki her user icin
+    for (i = 0; i < test_count; i++)
     {
-        train_data[i] = (int *)calloc(book_count, sizeof(int));
-        if (train_data[i] == NULL)
-        {
-            fprintf(stderr, "Allocation Error\n");
-            exit(1);
-        }
+        //her test user'in en benzer k kisini bul
+        findKSimilarUsers(test_data[i]);
     }
-    for (i = 0; i < test_size; i++)
+    //her test kullanicisi icin
+    for (i = 0; i < test_count; i++)
     {
-        test_data[i] = (int *)calloc(test_size, sizeof(int));
-        if (test_data[i] == NULL)
-        {
-            fprintf(stderr, "Allocation Error\n");
-            exit(1);
-        }
-    }
-    for (i = 0; i < book_count; i++)
-    {
-        book_names[i] = (char *)calloc(50, sizeof(char));
-        if (book_names[i] == NULL)
-        {
-            fprintf(stderr, "Allocation Error\n");
-            exit(1);
-        }
-    }
-    for (i = 0; i < test_size; i++)
-    {
-        similarity[i] = (Sim_node *)calloc(k, sizeof(Sim_node));
-        if (similarity[i] == NULL)
-        {
-            fprintf(stderr, "Allocation Error\n");
-            exit(1);
-        }
-    }
-
-    readFromCSV(train_data, train_size, test_data, test_size, book_names, book_count);
-    printf("\n\n");
-    for (i = 0; i < test_size; i++)
-    {
-        findKSimilarUsers(test_data[i], similarity[i], train_data, train_size, book_count, k);
-    }
-    for (i = 0; i < test_size; i++)
-    {
+        //j dongu degiskeni
         int j;
-        printf("NU%d icin benzerlik oranlari:\n", i + 1);
+        //kacinci kullanicinin similarity skorunu gosterdigimi kullaniciya bildir
+        printf("Similarity scores for NU%d:\n", i + 1);
+        //kullaniciya en benzer k kisinin skorlarini gostermek icin linked list uzerinde ilerleyecek index pointer
+        SimNode *temp = test_data[i]->similarities;
+        //k kere don
         for (j = 0; j < k; j++)
         {
-            printf("%d. en yakin user: U%d, benzerlik: %f\n", j + 1, similarity[i][j].user_id + 1, similarity[i][j].similarity);
+            //kullanici ile benzer olan kisinin id'si ve kullanici ile benzerlik oranlari
+            printf("\tU%d, similarity->%f\n", temp->id + 1, temp->similarity);
+            //similarities linked listinin bir sonraki elemanina gec
+            temp = temp->next;
         }
+        printf("\n");
     }
 
-    printf("\n\n");
-    for (i = 0; i < test_size; i++)
+    //tum test kullanicilari icin dongu
+    for (i = 0; i < test_count; i++)
     {
+        //j dongu degiskeni
         int j;
+        //en yuksek rate bizim onerecegimiz kitap bunu baslangicta dusuk bir deger olan -1 den baslattim
         float max_rate = -1;
+        //onerilecek kitabin kitaplar arrayindeki indexini tutan degisken
         int max_book;
-        printf("NU%d icin muhtemel kitap puanlari:\n", i + 1);
+        //hangi kullanici icin tahmin edilen oranlari gosterdigimi kullaniciya bildir
+        printf("Predicted rates for NU%d\n", i + 1);
+        //her kitap icin don
         for (j = 0; j < book_count; j++)
         {
-            if (test_data[i][j] == 0)
+            //eger kullanici bu kitabi okumamis ise
+            if (test_data[i]->books[j] == 0)
             {
-                float rate = makePrediction(test_data[i], j, similarity[i], train_data, book_count, k);
-                printf("%s kitabi icin beklenen puan : %f\n", book_names[j], rate);
+                //tahmin edilen puani hesapla
+                float rate = makePrediction(test_data[i], j);
+                //kullaniciya bu kitabin adini ve tahmini puanini soyle
+                printf("\tPredicted rate for %s -> %f\n", book_names[j], rate);
+                //eger bu oran benim max oranindan buyuk ise
                 if (rate > max_rate)
                 {
+                    //yeni max oran olarak bunu belirle
                     max_rate = rate;
+                    //yeni en yuksek oranli kitabin indexi olarak bu kitabin indexini belirle
                     max_book = j;
                 }
             }
         }
-        printf("\033[0;31m"
-               "Biz %s kitabini oneriyoruz!\n"
-               "\033[0m",
-               book_names[max_book]);
+        //en yuksek puanli kitabi kullaniciya biz bu kitabi oneriyoruz diye bildir
+        printf("We suggest book %s with predicted rate %f\n", book_names[max_book], max_rate);
         printf("\n");
     }
+
+    //kullanicinin ozellikle sectigi kullaniciyi kullaniciya hatirlat
+    printf("You selected NU%d\n", id + 1);
+    //max puan olarak dusuk bir deger belirle
+    float max_rate = -1;
+    //max puanli kitabin indexi olacak
+    int max_book;
+    //tum kitaplar icin dongu
+    for (i = 0; i < book_count; i++)
+    {
+        //eger kullanici bu kitabi okumamis ise
+        if (test_data[id]->books[i] == 0)
+        {
+            //tahmini puani hesapla
+            float rate = makePrediction(test_data[id], i);
+            //bu kitap icin tahmini puani kullaniciya bildir
+            printf("\tPredicted rate for %s -> %f\n", book_names[i], rate);
+            //eger bu kitabin puani max orandan daha buyuk ise
+            if (rate > max_rate)
+            {
+                //bu orani yeni max oran olarak belirle
+                max_rate = rate;
+                //bu kitabin indexini yeni max index olarak belirle
+                max_book = i;
+            }
+        }
+    }
+    //en yuksek olasi puanli kitabi kullaniciya bildir
+    printf("We suggest book %s with predicted rate %f\n", book_names[max_book], max_rate);
 
     return 0;
 }
 
-//verilen kullanicinin okudugu kitaplara verdigi ortalama puani return eden fonksiyon
-// @user -> puanı hesaplanacak kullanici (verilen puanlari tuttugun matrisin bu kullanicinin verdigi puanlara ait olan satiri)
-// @book_count -> veri setim icerisinde kac farkli kitap bulundugu
-float calculateAverageRating(int *user, int book_count)
+//alinan kullanicinin alinan numarali kitaba tahmini olarak kac puan verecegini hesaplayan fonksiyon
+//@nu -> kitaba verecegi puan hesaplanacak kullanici
+//@book_no -> kullanicinin verecegi puan hesaplanacak kitabin numarasi
+float makePrediction(User *nu, int book_no)
 {
-    //dongu degiskeni
+    //i dongu degiskeni
     int i;
-    //kullanicinin okudugu kitaplarin sayisi
-    int user_count = 0;
-    //kullanicinin okudugu kitaplara verdigi puanlarin ortalamasini tutan degisken
-    float avg = 0;
-    //veri seti icerisindeki her kitap icin
-    for (i = 0; i < book_count; i++)
-    {
-        //eger kullanici kitabi okudu ise
-        if (user[i] != 0)
-        {
-            //kitaba verdigi puani ortalamayi tutan degiskene ekleyen fonksiyon
-            avg += user[i];
-            //kullanicinin okudugu kitap sayisini arttiran fonksiyon
-            user_count++;
-        }
-    }
-    //toplam puanin okunan kitap sayisina bolumunu return eder
-    return avg / user_count;
-}
-
-//verilen kullanicinin verilen kitaba kac puan verecegini hesaplayan fonksiyon
-//@nu -> kitaba verecegi puanin tahmin edilecegi kullanicinin kitaplara verdigi puanlar arayi
-//@book_no -> kullanicinin verdigi puanin tahmin edilecegi kitap
-//@nu_similarity -> tum benzerliklerin tutuldugu matrisin ilgili kullaniciya ait satiri
-//@train_data -> kullanicilarin kitaplara verdigi puanlari tutan matris
-//@book_count -> dataset icerisindeki kitap sayisi
-//@k -> en yakin kac kullanicinin tutulacagi
-float makePrediction(int *nu, int book_no, Sim_node *nu_similarity, int **train_data, int book_count, int k)
-{
-    //dongu degiskeni
-    int i;
-    //kitaba verilecek puan
-    float rate = 0;
-    //tahmin edilecek kullanicinin ortalama verdigi puan
-    float avg_nu = calculateAverageRating(nu, book_count);
-    //kullanilan formulun pay kismi
+    //tahmin edilecek kullanicinin kitaplara verdigi ortalama puani tutan degisken
+    float avg_nu = calculateAverageRating(nu);
+    //formulun pay kismi
     float term1 = 0;
-    //kullanilan formulun payda kismi
+    //formulun payda kismi
     float term2 = 0;
-    //en benzer k kisi icin dongu
+    //kullanicinin similarity linked listinde dolasmak icin index pointer
+    SimNode *train_user = nu->similarities;
+    //kullanicinin similarities linked listinin her elemani icin dongu
     for (i = 0; i < k; i++)
     {
-        // en benzer i. user'in ortalama puaninin hesaplanmasi
-        float avg_u = calculateAverageRating(train_data[nu_similarity[i].user_id], book_count);
-        //en benzer i. user ile benzerligi hesaplayan fonksiyon
-        float sim = calculateSimilarity(nu, train_data[nu_similarity[i].user_id], book_count);
-        //formulun ust kismi
-        term1 += sim * (train_data[nu_similarity[i].user_id][book_no] - avg_u);
-        //formulun alt kismi
+        //kullanicinin similaritie linked listindeki kullanicinin id'sine sahip kullanicinin ortalmasinin hesaplanmasi
+        float avg_u = calculateAverageRating(train_data[train_user->id]);
+        //bu kullanici ile similarity listesindeki kullanicinin benzerliklerinin hesaplanmasi
+        float sim = calculateSimilarity(nu, train_data[train_user->id]);
+        //formulun pay kismi, similarity listesindeki kullanicinin bu kitaba verdigi puan ile ortalama puaninin farkinin bizim kullanicimiz ile olan benzerligi ile carpilmasi
+        term1 += sim * (train_data[train_user->id]->books[book_no] - avg_u);
+        //paydaya iki kullanicinin benzerliginin eklenmesi
         term2 += sim;
+        //similarity listindeki bir sonraki kullaniciya gecilmesi
+        train_user = train_user->next;
     }
-    //pay / paydayi return eden fonksiyon
+    //bizim kullanicimizin ortalama puani ile formulun pay ve paydasinin bolumunun toplanmasi
     return avg_nu + (term1 / term2);
 }
 
-//en yakin k kisiyi bulan fonksiyon
-//@new_user -> kendisine en yakin kisilerin hesaplanacagi kisi
-//@nu_similarity -> hesaplanan benzerliklerin yerlestirilecegi matrisin bu kullaniciya ait satiri
-//@train_data -> tum kullanicilar ve kitaplara verdigi puanlar matrisi
-//@train_size -> verdigi puanlar uzerinden hesap yapilacak kullanici sayisi
-//@book_count -> dataset icerisindeki kitap sayisi
-//@k -> en yakin kac adet kullanicinin bulunacagi
-void findKSimilarUsers(int *new_user, Sim_node *nu_similarity, int **train_data, int train_size, int book_count, int k)
+//verilen kullanicinin similarity linked listine new_id numarali kisinin similarity bilgilerinin insert edilmesi
+//@user-> similarity linked listine insert yapilacak kullanici
+//@new_id -> verilen kullanicinin similarity listine id'si ve similarity'si insert edilecek kullanicinin id'si
+//@new_sim -> verilen kullanicinin similarity listine id'si ve similarity'si insert edilecek kullanicinin similarity'si
+void insertToSimilarityList(User *user, float new_sim, int new_id)
 {
-    //dongu degiskeni
-    int i;
-    //k sutunlu similarity matrisinin tum sutunlari icin dongu
-    for (i = 0; i < k; i++)
+    //yeni bir similarity node'u allocate et
+    SimNode *newNode = (SimNode *)malloc(sizeof(SimNode));
+    //allocation kontrolu
+    if (newNode == NULL)
     {
-        //basta tum benzerlikleri -1 olarak ayarla
-        nu_similarity[i].similarity = -1;
+        printf("Allocation Error\n");
+        exit(1);
+    }
+    //yeni olusturdugum node'a similarity degerini yaz
+    newNode->similarity = new_sim;
+    //yeni olusturdugum koda id degerini yaz
+    newNode->id = new_id;
+
+    //eger kullanicinin similarity listi bos ise veya ilk elemaninin similarity degeri bizim insert edecegimiz degerden kucuk ise yeni node'u listenin basina insert et
+    if (user->similarities == NULL || user->similarities->similarity <= newNode->similarity)
+    {
+        //yeni node'un next'ini head yap
+        newNode->next = user->similarities;
+        //yeni head'i yeni node yap
+        user->similarities = newNode;
+        //fonksiyonu bitir
+        return;
     }
 
-    //train data icerisindeki her kullanici icin dongu
-    for (i = 0; i < train_size; i++)
+    //similarity listinde kac adim ilerdegimizi sayan degisken
+    int count = 0;
+    //similarity listinde index pointer olarak kullancagimiz degisken
+    SimNode *current = user->similarities;
+    //bundan sonra node yoksa ve bundan sonraki node'un similarity'si insert edilecek node'dan dusuk ise ve listede k adimdan az ilerlendi ise
+    while (current->next != NULL && current->next->similarity > newNode->similarity && count < k)
     {
-        //train datanin i. kullanicisi icin similarity hesaplanmasi
-        float sim = calculateSimilarity(new_user, train_data[i], book_count);
-        //hesaplanan similarity'i kullanicinin similarity dizisine insert eden fonksiyon
-        insertToSimilarityArray(nu_similarity, k, sim, i);
+        //adim sayisini bir arttir
+        count++;
+        //bir sonraki node'a gec
+        current = current->next;
+    }
+    //eger adim sayisi k dan kucuk ise
+    if (count < k)
+    {
+        //yeni node'u buraya ekle
+        //yeni node'un nextine current'in nextini ata
+        newNode->next = current->next;
+        //current->next'ine yeni node'u ata
+        current->next = newNode;
+    }
+    //eger k adimdan fazla ilerlendi ise en yuksek k degerden daha dusuk demektir eklemeye gerek yok
+}
+
+//verilen kullaniciya en benzer k adet kullaniciyi bulan fonksiyon
+//@user -> kendisine benzer kullanicilarin bulunacagi kullanici
+void findKSimilarUsers(User *user)
+{
+    //i dongu degiskeni
+    int i;
+    //train datadaki her U kullanicisi icin dongu
+    for (i = 0; i < train_count; i++)
+    {
+        //verilen kullanicinin i. train kullanicisi ile olan benzerligini hesapla
+        float sim = calculateSimilarity(user, train_data[i]);
+        //hesaplanan benzerligi verilen kullanicinin similarity listine insert eden fonksiyonu cagir
+        insertToSimilarityList(user, sim, i);
     }
 }
 
-//verilen degeri k elemanli diziye insert eden fonksiyon
-void insertToSimilarityArray(Sim_node *similarity_arr, int k, float new_sim, int new_id)
+//verilen iki kullanicinin birbirine olan benzerligini hesaplayan fonksiyon
+//@user1 -> benzerlik hesaplanacak 1. kullanici
+//@user2 -> benzerlik hesaplanacak 2. kullanici
+float calculateSimilarity(User *user1, User *user2)
 {
-    //dongu degiskeni
+    //i dongu degiskeni
     int i;
-    //k elemanli dizinin
-    for (i = 0; i < k; i++)
-    {
-        //yeni gonderilen similarity dizinin bu elemanindan buyuk mu diye bak
-        if (new_sim > similarity_arr[i].similarity)
-        {
-            //eger daha buyuk ise bu indexten itibaren her elemani saga kaydir
-            shiftRight(similarity_arr, k, i);
-            //yeni gelen similarity'i buraya ekle
-            similarity_arr[i].similarity = new_sim;
-            //yeni gelen similarity'nin hangi kullanici ile oldugu bilgisini tut
-            similarity_arr[i].user_id = new_id;
-            return;
-        }
-    }
-}
-
-//verilen diziyi verilen indexten itibaren bir eleman saga kaydiran fonksiyon
-//@arr -> similarity dizisinin bir satiri
-//@n -> dizinin eleman sayisi
-//@index -> hangi indexten itibaren kaydiracagim bilgisi
-void shiftRight(Sim_node *arr, int n, int index)
-{
-    //dongu degiskeni
-    int i;
-    //dizinin sonundan verilen indexe kadar dongu
-    for (i = n - 1; i > index; i--)
-    {
-        //degerleri bir sagdaki goze yaz
-        arr[i].similarity = arr[i - 1].similarity;
-        arr[i].user_id = arr[i - 1].user_id;
-    }
-}
-
-float calculateSimilarity(int *user1, int *user2, int book_count)
-{
-    int i;
+    //similarity degerini tutacak degisken
     float sim = 0;
-    float avg_user1 = 0;
-    int user1_count = 0;
-    float avg_user2 = 0;
-    int user2_count = 0;
-    for (i = 0; i < book_count; i++)
-    {
-        if (user1[i] != 0)
-        {
-            avg_user1 += user1[i];
-            user1_count++;
-        }
-        if (user2[i] != 0)
-        {
-            avg_user2 += user2[i];
-            user2_count++;
-        }
-    }
-    avg_user1 /= user1_count;
-    avg_user2 /= user2_count;
-
+    //1.kullanicinin ortalama puanini tutan degisken
+    float avg_user1 = calculateAverageRating(user1);
+    //2.kullanicinin ortalama puanini tutan degisken
+    float avg_user2 = calculateAverageRating(user2);
+    //iki kullanicinin covariance degerini tutan degisken
     float cov = 0;
+    //1. kullanicinin standart sapmasini tutan degisken
     float std_user1 = 0;
+    //2.kullanicinin standart sapmasini tutan degisken
     float std_user2 = 0;
+    //her bir kitap icin dongu
     for (i = 0; i < book_count; i++)
     {
-        if (user1[i] != 0 && user2[i] != 0)
+        //eher her iki kullanici da bu kitabi okudu ise
+        if (user1->books[i] != 0 && user2->books[i] != 0)
         {
-            cov += (user1[i] - avg_user1) * (user2[i] - avg_user2);
-            std_user1 += (user1[i] - avg_user1) * (user1[i] - avg_user1);
-            std_user2 += (user2[i] - avg_user2) * (user2[i] - avg_user2);
+            //1.kullanicinin bu kitaba verdigi puandan ortalama puanini cikar, 2.kullanicinin bu kitaba verdigi puandan ortalama puanini cikar ve bu iki degeri carpip co degerine ekle
+            cov += (user1->books[i] - avg_user1) * (user2->books[i] - avg_user2);
+            //1.kullanicinin bu kitaba verdigi puandan ortalama puani cikar ve karesini alip standart sapmasina ekle
+            std_user1 += (user1->books[i] - avg_user1) * (user1->books[i] - avg_user1);
+            //2.kullanicinin bu kitaba verdigi puandan ortalama puani cikar ve karesini alip standart sapmasina ekle
+            std_user2 += (user2->books[i] - avg_user2) * (user2->books[i] - avg_user2);
         }
     }
+    //standart sapma icin karekokunu al
     std_user1 = sqrt(std_user1);
+    //standart sapma icin karekokunu al
     std_user2 = sqrt(std_user2);
+    //cov degerini standart sapmalarin carpimina bol
     sim = cov / (std_user1 * std_user2);
+    //bu degeri return et
     return sim;
 }
 
-//csv dosyasinin okunarak train icin kullanilacak kullanicilarin train_data, test için kullanilacak kullanicilarin test_data icerisine atilmesi, kitap isimlerinin book_names icerisine islemleri bu fonksiyonda yapılıyor
-// @train_data -> karsilastirma isleminde kullanilacak kullanicilerin tutulduğu matris
-// @train_size -> karsilastirma isleminde kullanilacak kullanicilarin sayisi
-// @test_data -> sonucların test edilecegi kullanicilarin bilgilerini tutan matris
-// @test_size -> sonuclarin test edilecegi kullanici sayisi
-// @book_names -> kitap isimlerinin tutulacagi string array
-// @book_count -> kitap sayisi
-void readFromCSV(int **train_data, int train_size, int **test_data, int test_size, char **book_names, int book_count)
+//verilen kullanicinin kitaplara verdigi ortalama puani hesaplayan fonksiyon
+//@user -> ortalamsi hesaplanacak kullanici
+float calculateAverageRating(User *user)
 {
+    //i dongu degiskeni
+    int i;
+    //kullanicinin okudugu kitap sayisini tutacak degisken
+    int user_book_count = 0;
+    //kullanicinin verdigi ortalama puani tutacak degisken
+    float user_avg = 0;
+
+    //her kitap icin dongu
+    for (i = 0; i < book_count; i++)
+    {
+        //eger kullanici bu kitabi okudu ise
+        if (user->books[i] != 0)
+        {
+            //kullanicinin puanina bu kitaba verdigi puani ekle
+            user_avg += user->books[i];
+            //kullanicinin okudugu kitap sayisini 1 arttir
+            user_book_count++;
+        }
+    }
+    //kullanicinin verdigi toplam puani okudugu kitap sayisina bol ve return et
+    return user_avg / user_book_count;
+}
+
+//RecomendationDataSet.csv dosyasini uygun sekilde okuyan fonksiyon
+void readFromCSV()
+{
+    //dosyayi ac
     FILE *fp = fopen("RecomendationDataSet.csv", "r");
+    //dosya acildi mi kontrol et
     if (fp == NULL)
     {
         fprintf(stderr, "File error");
         exit(1);
     }
 
-    char line[500];
+    //dosyadan satir satir alinacak veri icin bir buffer
+    char line[1000];
 
+    //dosyanin ilk satirini al
     fgets(line, sizeof(line), fp);
+    //satiri token etmek icin kullanilacak pointer
     char *token;
-    int i = 0;
+    //satiri \n e gore token et
     token = strtok(line, "\n");
-    token = strtok(line, ",");
-    token = strtok(NULL, ",");
+    //satiri , e gore token et
+    token = strtok(line, ","); //dosyanin basindaki bosluk var
+    //bir daha , e gore token et
+    token = strtok(NULL, ","); //icinde ilk kitabin adi var
+    //tum satir token edilene kadar dongu
     while (token != NULL)
     {
-        strcpy(book_names[i++], token);
+        //kitap sayisini 1 arttir
+        book_count++;
+        //kitap isimlerinin tutulacagi string arrayinin boyutunu 1 arttir
+        expandBookNames();
+        //alinan kitap adini kitap isimlerinin tutuldugu string arrayine kopyala
+        strcpy(book_names[book_count - 1], token);
+        //bir sonraki elemani token et
         token = strtok(NULL, ",");
     }
 
-    for (i = 0; i < train_size; i++)
+    //kacinci train kullanicisinin bilgilerini token ettigimi tutan degisken
+    int i_train = 0;
+    //kacinci test kullancisinin bilgilerini token ettigimi tutan degisken
+    int i_test = 0;
+    //j dongu degiskeni
+    int j;
+    //dosyaninin sonuna gelene kadar dongu
+    while (fgets(line, sizeof(line), fp))
     {
-        fgets(line, sizeof(line), fp);
+        //satirin sonundaki \n i at
         token = strtok(line, "\n");
+        //satirin ilk elemanini token et bu kullanici adi
         token = strtok(line, ",");
+        //kullanici adi U ile basliyor ise train dataya NU ile basliyorsa test dataya atilacak ilk harfini user_type olarak al
+        char user_type = token[0];
+        //kullanicinin ilk kitaba verdigi puan
         token = strtok(NULL, ",");
-        int j = 0;
-        while (token != NULL)
+        //eger kullanicinin turu U veya u ise
+        if (user_type == 'U' || user_type == 'u')
         {
-            train_data[i][j++] = atoi(token);
-            token = strtok(NULL, ",");
+            //train data sayacini 1 arttir
+            train_count++;
+            //train data arrayinin boyutunu bir arttir
+            expandTrainData();
+            //train data arrayinin yeni acilan gozune yeni bir kullanici allocate edip yerlestir
+            train_data[train_count - 1] = createNewUser();
+            //j kacinci kitabi okudugumu tutan degisken
+            j = 0;
+            //satirin sonuna kadar
+            while (token != NULL)
+            {
+                //okunan kitap puanini kullanicinin kitaplar arrayine at puani stringten integer'a cevirmek icin atoi kullanildi
+                train_data[i_train]->books[j] = atoi(token);
+                //kitap numarasini arttir
+                j++;
+                //yeni kitabi al
+                token = strtok(NULL, ",");
+            }
+            //train edilen kullanici sayisini arttir
+            i_train++;
+        }
+        //eger kullanici turu NU ise
+        else
+        {
+            //test data sayacini arttir
+            test_count++;
+            //test data arrayini buyut
+            expandTestData();
+            //test datanin yeni yerine yeni bir kullanici yarat
+            test_data[test_count - 1] = createNewUser();
+            //kacinci kitabi okudugumu tutan degisken
+            j = 0;
+            //satirin sonuna kadar token et
+            while (token != NULL)
+            {
+                //okunan kitap puanini kullanicinin kitaplar arrayine at puani stringten integer'a cevirmek icin atoi kullanildi
+                test_data[i_test]->books[j] = atoi(token);
+                //kitap numarasini arttir
+                j++;
+                //yeni kitabi al
+                token = strtok(NULL, ",");
+            }
+            //test edilen kullanici sayisini arttir
+            i_test++;
         }
     }
+}
 
-    fgets(line, sizeof(line), fp);
-
-    for (i = 0; i < test_size; i++)
+//test datanin tutuldugu array'in boyutunu reallocate eden fonksiyon
+void expandTestData()
+{
+    //realloc isleminin guvenligi icin gecici degiskene allocation yapildi
+    User **tmp_data = (User **)realloc(test_data, test_count * sizeof(User *));
+    //bir sorun var ise hata ver ve programi bitir
+    if (tmp_data == NULL)
     {
-        fgets(line, sizeof(line), fp);
-        token = strtok(line, "\n");
-        token = strtok(line, ",");
-        token = strtok(NULL, ",");
-        int j = 0;
-        while (token != NULL)
-        {
-            test_data[i][j++] = atoi(token);
-            token = strtok(NULL, ",");
-        }
+        printf("Allocation Error\n");
+        exit(1);
     }
+    //bir sorun yok ise
+    else
+    {
+        //test dataya yeni olusturulan degiskeni at
+        test_data = tmp_data;
+    }
+}
+
+//train datanin tutuldugu array'in boyutunu reallocate eden fonksiyon
+void expandTrainData()
+{
+    //realloc isleminin guvenligi icin gecici degiskene allocation yapildi
+    User **tmp_data = (User **)realloc(train_data, train_count * sizeof(User *));
+    //bir sorun var ise hata ver ve programi bitir
+    if (tmp_data == NULL)
+    {
+        printf("Allocation Error\n");
+        exit(1);
+    }
+    //bir sorun yok ise
+    else
+    {
+        //train dataya yeni olusturulan degiskeni at
+        train_data = tmp_data;
+    }
+}
+
+//kitap isimlerinin tutuldugu char matrisini reallocate eden fonksiyon
+void expandBookNames()
+{
+    //realloc isleminin guvenligi icin gecici degiskene allocation yapildi
+    char **new_book_names = (char **)realloc(book_names, book_count * sizeof(char *));
+    //bir sorun var ise hata ver ve programi kapat
+    if (new_book_names == NULL)
+    {
+        printf("Allocation Error\n");
+        exit(1);
+    }
+    //bir sorun yok ise
+    else
+    {
+        //book_names'e yeni olusturulan degiskeni at
+        book_names = new_book_names;
+    }
+
+    //book_names matrisinin yeni eklenen satirini allocate et
+    book_names[book_count - 1] = (char *)malloc(MAX_LENGTH * sizeof(char));
+    //bir sorun var mi kontrol et
+    if (book_names[book_count - 1] == NULL)
+    {
+        printf("Allocation Error\n");
+        exit(1);
+    }
+}
+
+//yeni bir User yapisi olusturan fonksiyon
+User *createNewUser()
+{
+    //bir User pointer allocate et
+    User *newUser = (User *)malloc(sizeof(User));
+    //dogru allocate edildi mi kontrolu
+    if (newUser == NULL)
+    {
+        printf("Allocation Error\n");
+        exit(1);
+    }
+
+    //yeni kullanicinin kitaplara verdigi puanlarin tutulacagi books arrayini kitap sayisi kadar allocate et
+    newUser->books = (int *)malloc(book_count * sizeof(int));
+    //dogru allocate edildi mi kontrol et
+    if (newUser->books == NULL)
+    {
+        printf("Allocation Error\n");
+        exit(1);
+    }
+    //yeni kullanicinin similarities linked listine baslangicta null ata
+    newUser->similarities = NULL;
+    //yeni kullaniciyi return et
+    return newUser;
 }
